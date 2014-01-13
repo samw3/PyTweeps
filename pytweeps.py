@@ -13,6 +13,7 @@ from datetime import datetime
 from datetime import timedelta
 from config import *
 
+
 def isInt(s):
     try:
         int(s)
@@ -34,6 +35,9 @@ def initData(data):
         data.sync()
     if 'wasFollowedBy' not in data.keys():
         data['wasFollowedBy'] = set()
+        data.sync()
+    if 'lastTweet' not in data.keys():
+        data['lastTweet'] = dict()
         data.sync()
 
 
@@ -65,6 +69,8 @@ def usageMessage():
     print "        Remove any 'dead' tweeps. i.e. followers who no longer use twitter"
     print "    shotgun user numFollowers "
     print "        Add numFollowers followers from a user. Users no longer following and followed by are skipped"
+    print "    ignore user"
+    print "        Ignore a particular user, never try to follow them and unfollow if we are following."
     print ""
 
 
@@ -76,6 +82,43 @@ def error(message):
 
 def info(message):
     print message
+
+
+def update(api, data):
+    newUsers = 0
+    totalUsers = 0
+    stillFollowing = set()
+    for id in api.friends_ids():
+        stillFollowing.add(id)
+        if id not in data['following']:
+            newUsers += 1
+        totalUsers += 1
+    data['wasFollowing'] |= data['following']
+    data['wasFollowing'] |= stillFollowing
+    removed = len(data['following'] - stillFollowing)
+    data['following'] = stillFollowing
+    noLongerFollowing = data['wasFollowing'] - stillFollowing
+
+    data.sync()
+    print "Following %d, new %d, removed %d" % (totalUsers, newUsers, removed)
+
+    newUsers = 0
+    totalUsers = 0
+    stillFollowedBy = set()
+    for id in api.followers_ids():
+        stillFollowedBy.add(id)
+        if id not in data['followers']:
+            newUsers += 1
+        totalUsers += 1
+    data['wasFollowedBy'] |= data['followers']
+    data['wasFollowedBy'] |= stillFollowedBy
+    removed = len(data['followers'] - stillFollowedBy)
+    data['followers'] = stillFollowedBy
+    noLongerFollowedBy = data['wasFollowedBy'] - stillFollowedBy
+    data.sync()
+    print "Followers %d, new %d, removed %d" % (totalUsers, newUsers, removed)
+    print "No Longer Following %d" % len(noLongerFollowing)
+    print "No Longer Followed by %d" % len(noLongerFollowedBy)
 
 
 def main(argv):
@@ -99,42 +142,10 @@ def main(argv):
 
     command = argv[0]
     if command == "update":
-        newUsers = 0
-        totalUsers = 0
-        stillFollowing = set()
-        for id in api.friends_ids():
-            stillFollowing.add(id)
-            if id not in data['following']:
-                newUsers += 1
-            totalUsers += 1
-        data['wasFollowing'] |= data['following']
-        data['wasFollowing'] |= stillFollowing
-        removed = len(data['following'] - stillFollowing)
-        data['following'] = stillFollowing
-        noLongerFollowing = data['wasFollowing'] - stillFollowing
-
-        data.sync()
-        print "Following %d, new %d, removed %d" % (totalUsers, newUsers, removed)
-
-        newUsers = 0
-        totalUsers = 0
-        stillFollowedBy = set()
-        for id in api.followers_ids():
-            stillFollowedBy.add(id)
-            if id not in data['followers']:
-                newUsers += 1
-            totalUsers += 1
-        data['wasFollowedBy'] |= data['followers']
-        data['wasFollowedBy'] |= stillFollowedBy
-        removed = len(data['followers'] - stillFollowedBy)
-        data['followers'] = stillFollowedBy
-        noLongerFollowedBy = data['wasFollowedBy'] - stillFollowedBy
-        data.sync()
-        print "Followers %d, new %d, removed %d" % (totalUsers, newUsers, removed)
-        print "No Longer Following %d" % len(noLongerFollowing)
-        print "No Longer Followed by %d" % len(noLongerFollowedBy)
+        update(api, data)
 
     elif command == "bury":
+        # Check params
         if len(argv) < 3:
             error("Missing params daysSinceLastTweet or numberToBury")
         if not isInt(argv[1]):
@@ -146,36 +157,68 @@ def main(argv):
         delay = 0
         if len(argv) >= 4 and isInt(argv[3]):
             delay = argv[3]
+
+        # death date is the cut off. if they haven't tweeted since then, bury them
         deathDate = datetime.now() - timedelta(days=daysSinceLastTweet)
-        numBuried = 0
+
+        # Check the lastTweet cache, if their last tweet isn't after the deathDate don't bother checking against twitter
+        last = data['lastTweet']
+        lastKeys = last.keys()
+        toScan = set()
         for f in data['following']:
-            tweets = api.user_timeline(f, count=1)
-            if len(tweets) == 0:
-                # Never tweeted? bury.
-                user = api.get_user(f)
-                if user.screen_name not in neverBury:
-                    api.destroy_friendship(f)
-                    if delay > 0:
-                        print ""
-                    info("Buried '%s' R.I.P. (No Tweets)" % user.screen_name)
-                    numBuried += 1
+            if f in lastKeys:
+                if last[f] < deathDate:
+                    toScan.add(f)
+                    # else don't bother checking
             else:
-                lastTweet = tweets[0]
-                if (lastTweet.created_at < deathDate):
-                    if lastTweet.user.screen_name not in neverBury:
+                # not in cache, so check
+                toScan.add(f)
+
+        x = 0
+        numBuried = 0
+        try:
+            for f in toScan:
+                tweets = api.user_timeline(f, count=1)
+                if len(tweets) == 0:
+                    # Never tweeted? bury.
+                    user = api.get_user(f)
+                    if user.screen_name not in neverBury:
                         api.destroy_friendship(f)
-                        if delay > 0:
-                            print ""
-                        info("Buried '%s' R.I.P. (Last: %s)" % (lastTweet.user.screen_name, unicode(lastTweet.created_at)))
+                        print ""
+                        info("Buried '%s' R.I.P. (No Tweets)" % user.screen_name)
                         numBuried += 1
+                else:
+                    lastTweet = tweets[0]
+                    if (lastTweet.created_at < deathDate):
+                        if lastTweet.user.screen_name not in neverBury:
+                            api.destroy_friendship(f)
+                            print ""
+                            info("Buried '%s' R.I.P. (Last: %s)" % (
+                                lastTweet.user.screen_name, unicode(lastTweet.created_at)))
+                            numBuried += 1
+                    else:
+                        data['lastTweet'][f] = lastTweet.created_at
+                        data.sync()
 
-            if numBuried == numberToBury:
-                break
+                if numBuried == numberToBury:
+                    break
 
-            if delay > 0:
                 sys.stdout.write('.')
+                x += 1
+                if x % 100 == 0:
+                    sys.stdout.write("[" + str(x) + "]")
                 sys.stdout.flush()
-                time.sleep(float(delay))
+                if delay > 0:
+                    time.sleep(float(delay))
+        except tweepy.error.TweepError, e:
+            print ""
+            if e.message[0]['message'] == u'Rate limit exceeded':
+                info("Rate limit exceeded")
+            else:
+                print traceback.format_exc()
+                raise e
+        print ""
+        update(api, data)
 
     elif command == "shotgun":
         if len(argv) != 3:
@@ -205,6 +248,8 @@ def main(argv):
                     info("%d '%s' empty description." % (x, f.screen_name))
                 elif f.statuses_count <= shotgunTargetMinTweets:
                     info("%d '%s' not enough tweets." % (x, f.screen_name))
+                elif f.screen_name == username:
+                    info("%d '%s' can't follow yourself!" % (x, f.screen_name))
                 else:
                     api.create_friendship(f.id)
                     c += 1
@@ -212,12 +257,23 @@ def main(argv):
                     time.sleep(3)
                 if (c == numFollowers):
                     break;
-        except tweepy.TweepError, e:
-            if e.message == "Rate limit exceeded":
-                info("Rate limit exceeded, could only query %d followers", numFollowers)
+        except tweepy.error.TweepError, e:
+            print ""
+            if e.message[0]['message'] == u'Rate limit exceeded':
+                info("Rate limit exceeded")
             else:
                 print traceback.format_exc()
                 raise e
+        update(api, data)
+
+    elif command == "ignore":
+        if len(argv) != 2:
+            error("Missing params user")
+        user = api.get_user(argv[1])
+        api.destroy_friendship(user.id)
+        data['wasFollowing'].add(user.id)
+        print "'%s' ignored." % (user.screen_name)
+
     else:
         error("Unknown command '%s'" % command)
 

@@ -1,0 +1,13 @@
+# Twitter Settings
+username = 'yourTwitterHandle'
+# You can get this information from dev.twitter.com
+consumer_key = 'your_consumer_key'
+consumer_secret = 'your_consumer_secret'
+
+# these are users you never want to delete with the bury command
+neverBury = set(['viznut','madgarden','p1xlgames','your_favorite'])
+
+# These are some parameters for the shotgun command
+shotgunTargetMinFollowers = 10
+shotgunTargetMinFollowing = 30
+shotgunTargetMinTweets = 10

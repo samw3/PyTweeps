@@ -478,36 +478,57 @@ def main(argv):
             data['wasFollowing'].remove(user.id)
         print "'%s' FOLLOWED." % (user.screen_name)
 
+    elif command == "unfollow":
+        if len(argv) != 2:
+            error("Missing param fileName")
+        with io.open(argv[1], 'r', encoding='utf8') as f:
+            for line in f:
+                s = line.split("|",3)
+                if s[0] == 'x':
+                    api.destroy_friendship(s[1])
+                    print "Unfollowed", s[2]
+
     elif command == "unfollowers":
         if len(argv) != 2:
             error("Missing param fileName")
+        old = []
+        ids = set()
+        try:
+            with io.open(argv[1], 'r', encoding='utf8') as f:
+                for line in f:
+                    s = line.split("|",3)
+                    old.append(s)
+                    ids.add(int(s[1]))
+        except:
+            pass
         print "Creating a list of unfollowers to %s" % argv[1]
         me = api.me()
         c = 0
-        f = io.open(argv[1], 'w', encoding='utf8')
-        for id in api.friends_ids():
-            ref = api.show_friendship(source_id=id, target_id=me.id)
-            if not ref[0].following:
-                # User doesn't follow me
-                user = api.get_user(id)
-                desc = user.description.replace("\n",'').replace("\r",'')
-                try:
-                    if user.url:
-                        req = urllib2.urlopen(user.url)
-                        url = req.url
-                    else:
-                        url = ""
-                except:
-                    url = ""
-                f.write("|%s|%s|%s|%s|%s\n" % (id, user.screen_name, user.name, desc, url))
-            c += 1
-            sys.stdout.write('.')
-            if c % 100 == 0:
-                sys.stdout.write("[" + str(c) + "]")
-            sys.stdout.flush()
-            f.flush()
-            time.sleep(3)
-        f.close()
+        with io.open(argv[1], 'a', encoding='utf8') as f:
+            for id in api.friends_ids():
+                print [id], id in ids
+                if id not in ids:
+                    ref = api.show_friendship(source_id=id, target_id=me.id)
+                    if not ref[0].following:
+                        # User doesn't follow me
+                        user = api.get_user(id)
+                        desc = user.description.replace("\n",'').replace("\r",'')
+                        try:
+                            if user.url:
+                                req = urllib2.urlopen(user.url)
+                                url = req.url
+                            else:
+                                url = ""
+                        except:
+                            url = ""
+                        f.write("|%s|%s|%s|%s|%s\n" % (id, user.screen_name, user.name, desc, url))
+                        f.flush()
+                    time.sleep(3)
+                c += 1
+                sys.stdout.write('.')
+                if c % 100 == 0:
+                    sys.stdout.write("[" + str(c) + "]")
+                sys.stdout.flush()
 
     else:
         error("Unknown command '%s'" % command)

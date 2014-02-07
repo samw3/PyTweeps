@@ -505,6 +505,7 @@ def main(argv):
             if c % 100 == 0:
                 sys.stdout.write("[" + str(c) + "]")
             sys.stdout.flush()
+            f.flush()
             time.sleep(3)
         f.close()
 

@@ -13,7 +13,8 @@ import collections
 from datetime import datetime
 from datetime import timedelta
 from config import *
-
+import io
+import urllib2
 
 def isInt(s):
     try:
@@ -48,9 +49,9 @@ def follow(api, data, user):
 
 
 def authenticate(auth, data):
+    redirect_url = auth.get_authorization_url()
+    webbrowser.open(redirect_url)
     try:
-        redirect_url = auth.get_authorization_url()
-        webbrowser.open(redirect_url)
         verifier = raw_input('Verifier:')
         auth.set_request_token(auth.request_token.key, auth.request_token.secret)
         try:
@@ -79,11 +80,14 @@ def usageMessage():
     print "        Add numTweeps followers from a user. Doesn't follow previously followed users."
     print "    copycat user numTweeps"
     print "        Add numTweeps from the list of tweeps user is following.  Doesn't follow previously followed users."
+    print "    copykids numKids numTweeps"
+    print "        Add numKids from *every* person you follow's following list.  Stop after adding (approximately) numTweeps total."
     print "    ignore user"
     print "        Ignore a particular user, never try to follow them and unfollow if we are following."
     print "    follow user"
     print "        Follow a particular user, even if we retired them already."
-    print ""
+    print "    unfollowers filename"
+    print "        prints a list of unfollowers to filename"
 
 
 def error(message):
@@ -136,6 +140,38 @@ def update(api, data):
     print "No Longer Followed by %d" % len(noLongerFollowedBy)
 
 
+def copycat(api, data, copycatUser, numTweeps):
+    c = 0
+    x = 0
+    for f in tweepy.Cursor(api.friends, copycatUser).items():
+        x += 1
+        id = f.id
+        if id in data['wasFollowing']:
+            info("%d '%s' following or was following." % (x, f.screen_name))
+        elif id in data['wasFollowedBy']:
+            info("%d '%s' followed by or was followed." % (x, f.screen_name))
+        elif f.protected:
+            info("%d '%s' is protected." % (x, f.screen_name))
+        elif f.followers_count <= shotgunTargetMinFollowers:
+            info("%d '%s' not enough followers." % (x, f.screen_name))
+        elif f.friends_count <= shotgunTargetMinFollowing:
+            info("%d '%s' not following enough." % (x, f.screen_name))
+        elif f.description == "":
+            info("%d '%s' empty description." % (x, f.screen_name))
+        elif f.statuses_count <= shotgunTargetMinTweets:
+            info("%d '%s' not enough tweets." % (x, f.screen_name))
+        elif f.screen_name == username:
+            info("%d '%s' can't follow yourself!" % (x, f.screen_name))
+        else:
+            api.create_friendship(f.id)
+            c += 1
+            info("%d '%s' FOLLOWED(%d)." % (x, f.screen_name, c))
+            time.sleep(3)
+        if (c == numTweeps):
+            break;
+    return c
+
+
 def main(argv):
     pp = pprint.PrettyPrinter(indent=4)
 
@@ -149,7 +185,8 @@ def main(argv):
     initData(data)
 
     auth = tweepy.OAuthHandler(consumer_key, consumer_secret)
-    if 'access_token_key' not in data:
+    auth.secure = True
+    if ('access_token_key' not in data.keys()) or ('access_token_secret' not in data.keys()):
         authenticate(auth, data)
     auth.set_access_token(data['access_token_key'], data['access_token_secret'])
 
@@ -197,7 +234,7 @@ def main(argv):
                 if len(tweets) == 0:
                     # Never tweeted? bury.
                     user = api.get_user(f)
-                    if user.screen_name not in neverBury:
+                    if user.screen_name not in neverUnfollow:
                         api.destroy_friendship(f)
                         print ""
                         info("Buried '%s' R.I.P. (No Tweets)" % user.screen_name)
@@ -205,7 +242,7 @@ def main(argv):
                 else:
                     lastTweet = tweets[0]
                     if (lastTweet.created_at < cutoffDate):
-                        if lastTweet.user.screen_name not in neverBury:
+                        if lastTweet.user.screen_name not in neverUnfollow:
                             api.destroy_friendship(f)
                             print ""
                             info("Buried '%s' R.I.P. (Last: %s)" % (
@@ -253,7 +290,7 @@ def main(argv):
         # death date is the cut off. if they haven't tweeted since then, bury them
         cutoffDate = datetime.now() - timedelta(days=daysSinceFollowed)
 
-        # Check the lastTweet cache, if their last tweet isn't after the cutoffDate don't bother checking against twitter
+        # Check the wasFollowingOn cache, if their last tweet isn't after the cutoffDate don't bother checking against twitter
         last = data['wasFollowingOn']
         lastKeys = last.keys()
         followedOn = data['followedOn']
@@ -268,7 +305,7 @@ def main(argv):
                 if followedOn[f] < cutoffDate:
                     toScan.add(f)
             else:
-                # not in cache, so check
+                # doesn't have a followedOn date, so check
                 data['followedOn'][f] = datetime.now()
                 data.sync()
                 toScan.add(f)
@@ -287,13 +324,14 @@ def main(argv):
                     data['wasFollowingOn'][f] = datetime.now()
                     data.sync()
                 else:
-                # User not following me
+                    # User not following me
                     user = api.get_user(f)
-                    #api.destroy_friendship(f)
-                    print ""
-                    info("Requited '%s' (Followed On: %s)" % (user.screen_name, unicode(data['followedOn'][f])))
-                    numUnfollowed += 1
-                    # else still has time to follow
+                    if user.screen_name not in neverUnfollow:
+                        api.destroy_friendship(f)
+                        print ""
+                        info("Requited '%s' (Followed On: %s)" % (user.screen_name, unicode(data['followedOn'][f])))
+                        numUnfollowed += 1
+                        # else still has time to follow
                 if numUnfollowed == numberToUnfollow:
                     break
 
@@ -352,9 +390,19 @@ def main(argv):
                 elif f.screen_name == username:
                     info("%d '%s' can't follow yourself!" % (x, f.screen_name))
                 else:
-                    api.create_friendship(f.id)
-                    c += 1
-                    info("%d '%s' FOLLOWED(%d)." % (x, f.screen_name, c))
+                    try:
+                        api.create_friendship(f.id)
+                        c += 1
+                        info("%d '%s' FOLLOWED(%d)." % (x, f.screen_name, c))
+                    except tweepy.error.TweepError, e:
+                        print ""
+                        if e.message[0]['code'] == 162:
+                            info("%d '%s' blocked you." % (x, f.screen_name))
+                            api.destroy_friendship(f.id)
+                            data['wasFollowing'].add(f.id)
+                        else:
+                            print traceback.format_exc()
+                            raise e
                     time.sleep(3)
                 if (c == numTweeps):
                     break;
@@ -375,34 +423,33 @@ def main(argv):
             error("numTweeps is not an integer")
         numTweeps = int(argv[2])
         info("Copycatting '%s' for %d followers" % (copycatUser, numTweeps))
-        c = 0
-        x = 0
         try:
-            for f in tweepy.Cursor(api.friends, copycatUser).items():
-                x += 1
-                id = f.id
-                if id in data['wasFollowing']:
-                    info("%d '%s' following or was following." % (x, f.screen_name))
-                elif id in data['wasFollowedBy']:
-                    info("%d '%s' followed by or was followed." % (x, f.screen_name))
-                elif f.protected:
-                    info("%d '%s' is protected." % (x, f.screen_name))
-                elif f.followers_count <= shotgunTargetMinFollowers:
-                    info("%d '%s' not enough followers." % (x, f.screen_name))
-                elif f.friends_count <= shotgunTargetMinFollowing:
-                    info("%d '%s' not following enough." % (x, f.screen_name))
-                elif f.description == "":
-                    info("%d '%s' empty description." % (x, f.screen_name))
-                elif f.statuses_count <= shotgunTargetMinTweets:
-                    info("%d '%s' not enough tweets." % (x, f.screen_name))
-                elif f.screen_name == username:
-                    info("%d '%s' can't follow yourself!" % (x, f.screen_name))
-                else:
-                    api.create_friendship(f.id)
-                    c += 1
-                    info("%d '%s' FOLLOWED(%d)." % (x, f.screen_name, c))
-                    time.sleep(3)
-                if (c == numTweeps):
+            copycat(api, data, copycatUser, numTweeps)
+        except tweepy.error.TweepError, e:
+            print ""
+            if e.message[0]['message'] == u'Rate limit exceeded':
+                info("Rate limit exceeded")
+            else:
+                print traceback.format_exc()
+                raise e
+        update(api, data)
+
+    elif command == "copykids":
+        if len(argv) != 3:
+            error("Missing params numKids or numTweeps")
+        if not isInt(argv[1]):
+            error("numKids is not an integer")
+        numKids = int(argv[1])
+        if not isInt(argv[2]):
+            error("numTweeps is not an integer")
+        numTweeps = int(argv[2])
+        info("Copykidding %d follwers from each of your followers. %d followers total." % (numKids, numTweeps))
+        try:
+            c = 0
+            for f in tweepy.Cursor(api.followers).items():
+                info("********")
+                c += copycat(api, data, f, numKids)
+                if (c >= numTweeps):
                     break;
         except tweepy.error.TweepError, e:
             print ""
@@ -412,6 +459,7 @@ def main(argv):
                 print traceback.format_exc()
                 raise e
         update(api, data)
+
 
     elif command == "ignore":
         if len(argv) != 2:
@@ -429,6 +477,36 @@ def main(argv):
         if (user.id in data['wasFollowing']):
             data['wasFollowing'].remove(user.id)
         print "'%s' FOLLOWED." % (user.screen_name)
+
+    elif command == "unfollowers":
+        if len(argv) != 2:
+            error("Missing param fileName")
+        print "Creating a list of unfollowers to %s" % argv[1]
+        me = api.me()
+        c = 0
+        f = io.open(argv[1], 'w', encoding='utf8')
+        for id in api.friends_ids():
+            ref = api.show_friendship(source_id=id, target_id=me.id)
+            if not ref[0].following:
+                # User doesn't follow me
+                user = api.get_user(id)
+                desc = user.description.replace("\n",'').replace("\r",'')
+                try:
+                    if user.url:
+                        req = urllib2.urlopen(user.url)
+                        url = req.url
+                    else:
+                        url = ""
+                except:
+                    url = ""
+                f.write("|%s|%s|%s|%s|%s\n" % (id, user.screen_name, user.name, desc, url))
+            c += 1
+            sys.stdout.write('.')
+            if c % 100 == 0:
+                sys.stdout.write("[" + str(c) + "]")
+            sys.stdout.flush()
+            time.sleep(3)
+        f.close()
 
     else:
         error("Unknown command '%s'" % command)

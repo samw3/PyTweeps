@@ -459,7 +459,8 @@ def main(argv):
             c = 0
             for f in tweepy.Cursor(api.followers).items():
                 info("********")
-                c += copycat(api, data, f, numKids)
+                print("Copying %s's kids..." % (f.screen_name))
+                c += copycat(api, data, f.screen_name, numKids)
                 if (c >= numTweeps):
                     break;
         except tweepy.RateLimitError as err:

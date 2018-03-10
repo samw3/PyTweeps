@@ -413,13 +413,13 @@ def main(argv):
                         else:
                             print traceback.format_exc()
                             raise e
-                    time.sleep(3)
+                time.sleep(3)
                 if (c == numTweeps):
                     break;
         except tweepy.error.TweepError, e:
             print ""
             if e.message[0]['message'] == u'Rate limit exceeded':
-                info("Rate limit exceeded")
+                info("Rate limit exceeded.")
             else:
                 print traceback.format_exc()
                 raise e
@@ -435,13 +435,14 @@ def main(argv):
         info("Copycatting '%s' for %d followers" % (copycatUser, numTweeps))
         try:
             copycat(api, data, copycatUser, numTweeps)
+        except tweepy.RateLimitError as err:
+            print ""
+            info("Rate limit exceeded")
         except tweepy.error.TweepError, e:
             print ""
-            if e.message[0]['message'] == u'Rate limit exceeded':
-                info("Rate limit exceeded")
-            else:
-                print traceback.format_exc()
-                raise e
+            print (e.api_code)
+            print traceback.format_exc()
+            raise e
         update(api, data)
 
     elif command == "copykids":
@@ -461,13 +462,14 @@ def main(argv):
                 c += copycat(api, data, f, numKids)
                 if (c >= numTweeps):
                     break;
+        except tweepy.RateLimitError as err:
+            print ""
+            info("Rate limit exceeded")
         except tweepy.error.TweepError, e:
             print ""
-            if e.message[0]['message'] == u'Rate limit exceeded':
-                info("Rate limit exceeded")
-            else:
-                print traceback.format_exc()
-                raise e
+            print (e.api_code)
+            print traceback.format_exc()
+            raise e
         update(api, data)
 
 

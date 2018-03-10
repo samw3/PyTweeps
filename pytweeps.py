@@ -234,7 +234,7 @@ def main(argv):
                 if len(tweets) == 0:
                     # Never tweeted? bury.
                     user = api.get_user(f)
-                    if user.screen_name not in neverUnfollow:
+                    if user.screen_name not in neverBury:
                         api.destroy_friendship(f)
                         print ""
                         info("Buried '%s' R.I.P. (No Tweets)" % user.screen_name)
@@ -242,7 +242,7 @@ def main(argv):
                 else:
                     lastTweet = tweets[0]
                     if (lastTweet.created_at < cutoffDate):
-                        if lastTweet.user.screen_name not in neverUnfollow:
+                        if lastTweet.user.screen_name not in neverBury:
                             api.destroy_friendship(f)
                             print ""
                             info("Buried '%s' R.I.P. (Last: %s)" % (
@@ -335,7 +335,7 @@ def main(argv):
                 else:
                     # User not following me
                     user = api.get_user(f)
-                    if user.screen_name not in neverUnfollow:
+                    if user.screen_name not in neverBury:
                         api.destroy_friendship(f)
                         print ""
                         info("Requited '%s' (Followed On: %s)" % (user.screen_name, unicode(data['followedOn'][f])))

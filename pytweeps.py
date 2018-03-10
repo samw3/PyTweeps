@@ -317,7 +317,16 @@ def main(argv):
         me = api.me()
         try:
             for f in toScan:
-                user = api.get_user(f)
+                try:
+                    user = api.get_user(f)
+                except tweepy.error.TweepError, e:
+                    if isinstance(e.message, collections.Iterable):
+                        if e.message[0]['message'] == u'User not found.':
+                            info("User not found, skipping...")
+                        else:
+                            print traceback.format_exc()
+                            raise e
+
                 ref = api.show_friendship(source_id=f, target_id=me.id)
                 if ref[0].following:
                     # User follows me

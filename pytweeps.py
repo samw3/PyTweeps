@@ -53,11 +53,12 @@ def authenticate(auth, data):
     webbrowser.open(redirect_url)
     try:
         verifier = raw_input('Verifier:')
-        auth.set_request_token(auth.request_token.key, auth.request_token.secret)
+        data['request_token'] = auth.request_token
+        # auth.set_request_token(auth.request_token.key, auth.request_token.secret)
         try:
             auth.get_access_token(verifier)
-            data['access_token_key'] = auth.access_token.key
-            data['access_token_secret'] = auth.access_token.secret
+            data['access_token_key'] = auth.access_token
+            data['access_token_secret'] = auth.access_token_secret
             data.sync()
             auth.set_access_token(data['access_token_key'], data['access_token_secret'])
 
